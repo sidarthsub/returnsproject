@@ -1,8 +1,40 @@
-# Dependencies
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.next/
+out/
 
 # Environment variables
 .env
@@ -20,11 +52,6 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Build outputs
-dist/
-build/
-*.log
-
 # Testing
 coverage/
 .nyc_output/
@@ -32,3 +59,7 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Excel outputs (examples are kept)
+*.xlsx
+!packages/excel/examples/*.xlsx

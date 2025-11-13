@@ -1,0 +1,10 @@
+# Development dependencies for the entire project
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.12.0
+ruff>=0.1.8
+mypy>=1.7.0
+
+# Install local packages in editable mode
+-e packages/domain[dev]
+-e packages/excel[dev]
