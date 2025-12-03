@@ -48,9 +48,12 @@ renderer.render("output/cap_table.xlsx")
 Row 1:   Cap Table - [Snapshot Label]
 Row 3:   Headers
 Row 4+:  Common shareholders
-Row N:   Option Pool
-Row N+1: "Preferred Rounds" header
-Row N+2+: Preferred investors (by round)
+Row N:   [EMPTY ROW]
+Row N+1: Allocated Options
+Row N+2: ESOP Available
+Row N+3: [EMPTY ROW]
+Row N+4: "Preferred Rounds" header
+Row N+5+: Preferred investors (by round)
 Row M:   Totals
 Row M+1: Starting Shares (pre-round)
 Row M+2: Pre-Money Valuation
@@ -79,6 +82,10 @@ N+1: % FD (fully diluted %)
 
 **Note:**
 - Each preferred round has its own option pool column, as each round may include option pool expansion
+- Option pool is shown in two rows under the common shareholders section:
+  - **Allocated Options**: Options that have been granted to employees
+  - **ESOP Available**: Options still available for future grants
+  - Total option pool per round = Allocated + Available
 - "Total Shares (FD)" consolidates what were previously two columns ("Total Shares" and "Total FD Shares") since they represent the same value
 
 ### Formula Architecture
@@ -105,7 +112,8 @@ N+1: % FD (fully diluted %)
 - **Strategic borders**: Minimal use - header underlines, totals separators, section dividers, and valuation boxes
 - **Visual spacing**:
   - Empty columns between sections (Common | GAP | Seed ($, #, Option Pool) | GAP | Series A ($, #, Option Pool) | GAP | Summary)
-  - Empty rows between holder groups (common holders, preferred rounds, totals)
+  - Empty rows between holder groups (common holders, option pool section, preferred rounds, totals)
+  - Option pool section shows "Allocated Options" and "ESOP Available" as separate rows
 - **Box around cap table**: Medium borders around entire data area with gridlines hidden
 - **Header styling**: Gray backgrounds with bottom borders for clear column identification
 - **Column widths**: Auto-adjusted (25 chars for names, 15 for numbers, 12 for percentages)
