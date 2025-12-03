@@ -244,33 +244,24 @@ class RoundSheetRenderer:
         avail_label.font = Font(italic=True)
 
         # Populate option pool values per round
-        # For simplicity, show the total pool in the most recent round's column
-        # In a more sophisticated version, we'd track per-round allocation/availability
-        if pref_class_ids:
-            # Show in the last (most recent) round column
-            last_pref_id = pref_class_ids[-1]
-            opt_col = col_map[f"{last_pref_id}_option_pool"]
-            is_prev_round = last_pref_id in prev_pref_class_ids
+        # Show option pool expansion in each round's column
+        for pref_id in pref_class_ids:
+            opt_col = col_map[f"{pref_id}_option_pool"]
+            is_prev_round = pref_id in prev_pref_class_ids
 
-            # Allocated Options
-            alloc_cell = sheet[f"{opt_col}{allocated_row}"]
-            alloc_cell.value = float(option_pool_allocated) if option_pool_allocated else None
-            if is_prev_round:
-                alloc_cell.font = self.green_font
-                alloc_cell.comment = Comment(f"Value from {prev_label}", "System")
-            else:
-                alloc_cell.font = self.blue_font
-            alloc_cell.number_format = '#,##0'
+            # Get option pool expansion for this specific round
+            round_option_pool = option_pool_by_round.get(pref_id, Decimal("0"))
 
-            # ESOP Available
-            avail_cell = sheet[f"{opt_col}{available_row}"]
-            avail_cell.value = float(option_pool_available) if option_pool_available else None
-            if is_prev_round:
-                avail_cell.font = self.green_font
-                avail_cell.comment = Comment(f"Value from {prev_label}", "System")
-            else:
-                avail_cell.font = self.blue_font
-            avail_cell.number_format = '#,##0'
+            if round_option_pool and round_option_pool > 0:
+                # For rounds with option pool expansion, show in ESOP Available
+                avail_cell = sheet[f"{opt_col}{available_row}"]
+                avail_cell.value = float(round_option_pool)
+                if is_prev_round:
+                    avail_cell.font = self.green_font
+                    avail_cell.comment = Comment(f"Value from {prev_label}", "System")
+                else:
+                    avail_cell.font = self.blue_font
+                avail_cell.number_format = '#,##0'
 
         row = available_row + 1
 
@@ -551,22 +542,29 @@ class RoundSheetRenderer:
         share_columns = [col_map["common_shares"]] + [col_map[f"{pid}_shares"] for pid in pref_class_ids] + [col_map[f"{pid}_option_pool"] for pid in pref_class_ids]
 
         for r in range(4, row):
-            # Skip the "Preferred Rounds" header row and option pool label rows
+            # Get the holder name in column A
+            cell_a_value = sheet.cell(row=r, column=1).value
+
+            # Skip empty rows, header rows, and section separators
+            if not cell_a_value:
+                continue
             if r == pref_header_row:
                 continue
-            # Skip "Allocated Options" and "ESOP Available" labels (no totals for labels)
-            cell_a_value = sheet.cell(row=r, column=1).value
+            if cell_a_value == "Preferred Rounds":
+                continue
+
+            # Handle option pool rows specially
             if cell_a_value in ["Allocated Options", "ESOP Available"]:
                 # Still calculate Total Shares for option pool rows
                 share_sums = "+".join(f"{col}{r}" for col in share_columns)
                 total_shares_cell = sheet[f"{col_map['total_shares']}{r}"]
-                total_shares_cell.value = f"=IFERROR({share_sums},0)"
+                total_shares_cell.value = f"=IFERROR({share_sums},\"\")"  # Blank if 0
                 total_shares_cell.font = self.black_font  # Calculated
                 total_shares_cell.number_format = '#,##0'
 
                 # % FD for option pool rows
                 pct_fd_cell = sheet[f"{col_map['pct_fd']}{r}"]
-                pct_fd_cell.value = f"=IFERROR({col_map['total_shares']}{r}/{col_map['total_shares']}{totals_row},0)"
+                pct_fd_cell.value = f"=IFERROR({col_map['total_shares']}{r}/{col_map['total_shares']}{totals_row},\"\")"  # Blank if 0
                 pct_fd_cell.font = self.black_font  # Calculated
                 pct_fd_cell.number_format = '0.0%'
                 continue
@@ -574,13 +572,13 @@ class RoundSheetRenderer:
             # Total Shares = sum of all share columns for this holder
             share_sums = "+".join(f"{col}{r}" for col in share_columns)
             total_shares_cell = sheet[f"{col_map['total_shares']}{r}"]
-            total_shares_cell.value = f"=IFERROR({share_sums},0)"
+            total_shares_cell.value = f"=IFERROR({share_sums},\"\")"  # Blank if 0
             total_shares_cell.font = self.black_font  # Calculated
             total_shares_cell.number_format = '#,##0'
 
             # % FD = Total Shares / Total Shares in totals row
             pct_fd_cell = sheet[f"{col_map['pct_fd']}{r}"]
-            pct_fd_cell.value = f"=IFERROR({col_map['total_shares']}{r}/{col_map['total_shares']}{totals_row},0)"
+            pct_fd_cell.value = f"=IFERROR({col_map['total_shares']}{r}/{col_map['total_shares']}{totals_row},\"\")"  # Blank if 0
             pct_fd_cell.font = self.black_font  # Calculated
             pct_fd_cell.number_format = '0.0%'
 
