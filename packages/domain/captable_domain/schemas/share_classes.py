@@ -279,13 +279,7 @@ class ShareClass(DomainModel):
     )
 
     # Note: Dividend rights removed for MVP (rare for VC-backed startups)
-
-    # Voting rights
-    votes_per_share: Decimal = Field(
-        default=Decimal("1.0"),
-        ge=0,
-        description="Voting power per share (usually 1.0, sometimes 10.0 for supervoting)"
-    )
+    # Note: Voting rights removed (not needed for returns modeling)
 
     # Metadata
     created_in_round_id: Optional[RoundId] = Field(

@@ -535,18 +535,18 @@ class OptionPoolCreation(CapTableEvent):
         return self
 
     def apply(self, snapshot: 'CapTableSnapshot') -> None:
-        """Add shares to option pool, adjust shares outstanding if needed."""
+        """Add shares to option pool.
+
+        Note: Option pool shares are tracked separately in option_pool_authorized
+        and option_pool_available. They are NOT added to total_shares_outstanding
+        because they haven't been issued yet. The fully_diluted_shares property
+        adds option_pool_available to get the fully diluted count.
+        """
         snapshot.option_pool_authorized += self.shares_authorized
         snapshot.option_pool_available += self.shares_authorized
 
-        # Pre-money: Pool shares increase total outstanding
-        # (dilutes founders before investment)
-        if self.pool_timing == "pre_money":
-            snapshot.total_shares_outstanding += self.shares_authorized
-
-        # Post-money or target: Pool is carved out of post-money total
-        # Total shares already includes investor shares
-        # Pool doesn't add to outstanding (it's reserved, not issued)
+        # Option pool shares are reserved, not issued, so they don't affect
+        # total_shares_outstanding. They only affect fully_diluted_shares.
 
 
 # =============================================================================

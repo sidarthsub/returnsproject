@@ -298,12 +298,7 @@ class ShareClass(DomainModel):
         description="Dividend rights (rare for startups)"
     )
 
-    # Voting rights
-    votes_per_share: Decimal = Field(
-        default=Decimal("1.0"),
-        ge=0,
-        description="Voting power per share (usually 1.0, sometimes 10.0 for supervoting)"
-    )
+    # Note: Voting rights removed (not needed for returns modeling)
 
     # Metadata
     created_in_round_id: Optional[RoundId] = Field(
@@ -375,16 +370,7 @@ class SAFEInstrument(DomainModel):
         description="Pre-money or post-money SAFE"
     )
 
-    # Advanced features (optional)
-    mfn_enabled: bool = Field(
-        default=False,
-        description="Most Favored Nation - upgrade to better terms if later SAFE is better"
-    )
-
-    pro_rata_side_letter: bool = Field(
-        default=False,
-        description="Grants pro-rata rights in next round"
-    )
+    # Note: MFN and pro-rata side letters removed for MVP simplification
 
     @model_validator(mode='after')
     def validate_cap_or_discount(self):
@@ -1682,8 +1668,7 @@ class WaterfallValidator:
     "common": {
       "id": "common",
       "name": "Common Stock",
-      "share_type": "common",
-      "votes_per_share": 1.0
+      "share_type": "common"
     },
     "seed_preferred": {
       "id": "seed_preferred",

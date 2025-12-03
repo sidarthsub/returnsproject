@@ -30,9 +30,8 @@ class CapTableBlock(Block):
             * share_class_name: Share class name
             * shares: Number of shares owned
             * ownership_pct: Fully diluted ownership percentage
-            * liquidation_preference: Total liquidation preference amount (if applicable)
-            * votes: Total voting power
-            * voting_pct: Voting percentage
+            * preferred_pct: Percentage of preferred shares owned (0 if not preferred)
+            * liquidation_preference_multiple: Liquidation preference multiple (if applicable)
 
         - cap_table_by_class: DataFrame with columns:
             * share_class_id: Share class identifier
@@ -113,6 +112,13 @@ class CapTableBlock(Block):
         # Total fully diluted shares for percentage calculations
         total_shares = snapshot.fully_diluted_shares
 
+        # Calculate total preferred shares for preferred_pct
+        total_preferred_shares = Decimal("0")
+        for position in snapshot.positions:
+            share_class = snapshot.share_classes.get(position.share_class_id)
+            if share_class and share_class.share_type == "preferred":
+                total_preferred_shares += position.shares
+
         for position in snapshot.positions:
             # Get share class details
             share_class = snapshot.share_classes.get(position.share_class_id)
@@ -127,6 +133,11 @@ class CapTableBlock(Block):
                 else 0.0
             )
 
+            # Calculate preferred percentage (only for preferred shares)
+            preferred_pct = 0.0
+            if share_class.share_type == "preferred" and total_preferred_shares > 0:
+                preferred_pct = float(position.shares / total_preferred_shares * 100)
+
             # Calculate liquidation preference
             liquidation_pref = None
             if share_class.liquidation_preference:
@@ -135,14 +146,6 @@ class CapTableBlock(Block):
                 # So just store the multiple for now
                 liquidation_pref = share_class.liquidation_preference.multiple
 
-            # Calculate voting power
-            votes = position.shares * share_class.votes_per_share
-            voting_pct = (
-                float(votes / snapshot.total_voting_shares * 100)
-                if snapshot.total_voting_shares > 0
-                else 0.0
-            )
-
             rows.append({
                 "holder_id": position.holder_id,
                 "holder_name": position.holder_id,  # TODO: Add holder names to schema in future
@@ -150,9 +153,8 @@ class CapTableBlock(Block):
                 "share_class_name": share_class.name,
                 "shares": float(position.shares),
                 "ownership_pct": ownership_pct,
+                "preferred_pct": preferred_pct,
                 "liquidation_preference_multiple": float(liquidation_pref) if liquidation_pref else None,
-                "votes": float(votes),
-                "voting_pct": voting_pct,
             })
 
         df = pd.DataFrame(rows)
@@ -213,7 +215,6 @@ class CapTableBlock(Block):
         # Count shares by type
         common_shares = Decimal("0")
         preferred_shares = Decimal("0")
-        option_pool_shares = Decimal("0")
 
         for position in snapshot.positions:
             share_class = snapshot.share_classes.get(position.share_class_id)
@@ -221,10 +222,7 @@ class CapTableBlock(Block):
                 continue
 
             if share_class.share_type == "common":
-                if "option" in position.holder_id.lower() or "pool" in position.holder_id.lower():
-                    option_pool_shares += position.shares
-                else:
-                    common_shares += position.shares
+                common_shares += position.shares
             elif share_class.share_type == "preferred":
                 preferred_shares += position.shares
 
@@ -234,7 +232,7 @@ class CapTableBlock(Block):
             "total_share_classes": len(snapshot.share_classes),
             "common_shares": float(common_shares),
             "preferred_shares": float(preferred_shares),
-            "option_pool_shares": float(option_pool_shares),
+            "option_pool_shares": float(snapshot.option_pool_available),
         }])
 
         return summary

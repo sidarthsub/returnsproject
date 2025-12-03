@@ -100,6 +100,60 @@ class WaterfallBlock(Block):
         # Calculate net proceeds after transaction costs
         net_proceeds = scenario.calculate_net_proceeds()
 
+        # For non-participating preferred, we need to determine optimal choice
+        # Calculate what as-converted distribution would be
+        as_converted_per_share = net_proceeds / snapshot.fully_diluted_shares if snapshot.fully_diluted_shares > 0 else Decimal("0")
+
+        # Categorize positions by participation type
+        participating_positions = []
+        non_participating_positions = []
+        common_positions = []
+
+        for position in snapshot.positions:
+            share_class = snapshot.share_classes.get(position.share_class_id)
+            if not share_class:
+                continue
+
+            if share_class.participation_rights:
+                if share_class.participation_rights.participation_type in ("participating", "capped_participating"):
+                    participating_positions.append((position, share_class))
+                elif share_class.participation_rights.participation_type == "non_participating":
+                    # Determine optimal choice for non-participating
+                    # Use cost_basis if available, otherwise shares * multiple
+                    if share_class.liquidation_preference:
+                        if position.cost_basis is not None:
+                            liq_pref_amount = position.cost_basis * share_class.liquidation_preference.multiple
+                        else:
+                            liq_pref_amount = position.shares * share_class.liquidation_preference.multiple
+                    else:
+                        liq_pref_amount = Decimal("0")
+
+                    as_converted_amount = position.shares * as_converted_per_share
+
+                    if liq_pref_amount > as_converted_amount:
+                        # Take liquidation preference
+                        non_participating_positions.append((position, share_class, "preference"))
+                    else:
+                        # Convert to common
+                        non_participating_positions.append((position, share_class, "convert"))
+            elif share_class.liquidation_preference:
+                # Has liquidation preference but no participation rights specified
+                # Treat as non-participating
+                if position.cost_basis is not None:
+                    liq_pref_amount = position.cost_basis * share_class.liquidation_preference.multiple
+                else:
+                    liq_pref_amount = position.shares * share_class.liquidation_preference.multiple
+
+                as_converted_amount = position.shares * as_converted_per_share
+
+                if liq_pref_amount > as_converted_amount:
+                    non_participating_positions.append((position, share_class, "preference"))
+                else:
+                    non_participating_positions.append((position, share_class, "convert"))
+            else:
+                # Common or other share classes
+                common_positions.append((position, share_class))
+
         # Initialize distribution tracking
         distributions: Dict[str, Dict[str, Decimal]] = {}  # holder_id -> {step_name -> amount}
         for position in snapshot.positions:
@@ -110,19 +164,22 @@ class WaterfallBlock(Block):
         remaining_proceeds = net_proceeds
         step_number = 1
 
-        # Step 1: Pay liquidation preferences by seniority
+        # Step 1: Pay liquidation preferences by seniority (participating + non-participating taking preference)
         remaining_proceeds, step_number = self._distribute_liquidation_preferences(
-            snapshot, remaining_proceeds, distributions, waterfall_steps, step_number
+            snapshot, remaining_proceeds, distributions, waterfall_steps, step_number,
+            non_participating_positions
         )
 
-        # Step 2: Participation (if applicable)
+        # Step 2: Participation (participating preferred only)
         remaining_proceeds, step_number = self._distribute_participation(
             snapshot, remaining_proceeds, distributions, waterfall_steps, step_number
         )
 
         # Step 3: Remaining proceeds to common (as-converted)
+        # This includes: common shares + non-participating that chose to convert
         remaining_proceeds, step_number = self._distribute_to_common(
-            snapshot, remaining_proceeds, distributions, waterfall_steps, step_number
+            snapshot, remaining_proceeds, distributions, waterfall_steps, step_number,
+            non_participating_positions
         )
 
         # Convert to DataFrames
@@ -141,8 +198,14 @@ class WaterfallBlock(Block):
         distributions: Dict[str, Dict[str, Decimal]],
         steps: List[Dict],
         step_number: int,
+        non_participating_positions: List,
     ) -> tuple[Decimal, int]:
         """Distribute liquidation preferences by seniority.
+
+        Only distributes to:
+        - Participating preferred (will also get participation later)
+        - Capped participating preferred (will also get participation later)
+        - Non-participating preferred that chose preference over conversion
 
         Args:
             snapshot: CapTableSnapshot
@@ -150,15 +213,26 @@ class WaterfallBlock(Block):
             distributions: Distribution tracking dict (mutated)
             steps: Waterfall steps list (mutated)
             step_number: Current step number
+            non_participating_positions: List of (position, share_class, choice) tuples
 
         Returns:
             (remaining_proceeds, next_step_number)
         """
+        # Build set of non-participating holders taking conversion (skip their liquidation preference)
+        converting_holders = set()
+        for position, share_class, choice in non_participating_positions:
+            if choice == "convert":
+                converting_holders.add((position.holder_id, position.share_class_id))
+
         # Group positions by seniority rank
         by_seniority: Dict[int, List] = {}
         for position in snapshot.positions:
             share_class = snapshot.share_classes.get(position.share_class_id)
             if not share_class or not share_class.liquidation_preference:
+                continue
+
+            # Skip if this is non-participating choosing to convert
+            if (position.holder_id, position.share_class_id) in converting_holders:
                 continue
 
             rank = share_class.liquidation_preference.seniority_rank
@@ -173,18 +247,28 @@ class WaterfallBlock(Block):
             # Calculate total liquidation preference at this rank
             total_liq_pref = Decimal("0")
             for position, share_class in positions_at_rank:
-                # liq_pref = shares * original_price * multiple
-                # For MVP: we don't have original_price, so just use multiple as placeholder
-                # In production, would track investment_amount or price_per_share
+                # liq_pref = cost_basis * multiple
+                # Use cost_basis if available (actual investment), otherwise shares * multiple
                 liq_pref_multiple = share_class.liquidation_preference.multiple
-                total_liq_pref += position.shares * liq_pref_multiple
+                if position.cost_basis is not None:
+                    # Use actual investment amount * multiple
+                    position_liq_pref = position.cost_basis * liq_pref_multiple
+                else:
+                    # Fallback for positions without cost_basis (founder shares, etc.)
+                    position_liq_pref = position.shares * liq_pref_multiple
+                total_liq_pref += position_liq_pref
 
             # Distribute available proceeds pro-rata at this seniority level
             amount_to_distribute = min(remaining, total_liq_pref)
 
             for position, share_class in positions_at_rank:
                 liq_pref_multiple = share_class.liquidation_preference.multiple
-                position_liq_pref = position.shares * liq_pref_multiple
+
+                # Calculate this position's liquidation preference
+                if position.cost_basis is not None:
+                    position_liq_pref = position.cost_basis * liq_pref_multiple
+                else:
+                    position_liq_pref = position.shares * liq_pref_multiple
 
                 # Pro-rata share of distribution
                 if total_liq_pref > 0:
@@ -224,35 +308,10 @@ class WaterfallBlock(Block):
     ) -> tuple[Decimal, int]:
         """Distribute participation rights (participating preferred).
 
-        Args:
-            snapshot: CapTableSnapshot
-            remaining: Remaining proceeds
-            distributions: Distribution tracking dict (mutated)
-            steps: Waterfall steps list (mutated)
-            step_number: Current step number
-
-        Returns:
-            (remaining_proceeds, next_step_number)
-        """
-        # For MVP: simplified participation
-        # Full participation: preferred shares participate pro-rata with common
-        # This would require tracking as-converted shares and participation caps
-
-        # Placeholder for future implementation
-        # In production: distribute to participating preferred pro-rata with common
-        # up to participation cap (if any)
-
-        return remaining, step_number
-
-    def _distribute_to_common(
-        self,
-        snapshot: CapTableSnapshot,
-        remaining: Decimal,
-        distributions: Dict[str, Dict[str, Decimal]],
-        steps: List[Dict],
-        step_number: int,
-    ) -> tuple[Decimal, int]:
-        """Distribute remaining proceeds to common (as-converted).
+        Handles three types of participation:
+        1. participating: Double dip - gets liquidation preference AND pro-rata share
+        2. capped_participating: Same as participating but capped at cap_multiple
+        3. non_participating: Gets BETTER of liquidation preference OR as-converted
 
         Args:
             snapshot: CapTableSnapshot
@@ -267,16 +326,157 @@ class WaterfallBlock(Block):
         if remaining <= 0:
             return remaining, step_number
 
-        # All shares convert to common and participate pro-rata
-        total_as_converted_shares = snapshot.fully_diluted_shares
+        # Identify participating preferred positions
+        participating_positions = []
+        for position in snapshot.positions:
+            share_class = snapshot.share_classes.get(position.share_class_id)
+            if not share_class:
+                continue
 
-        if total_as_converted_shares > 0:
+            # Check if this class has participating rights
+            if share_class.participation_rights and \
+               share_class.participation_rights.participation_type in ("participating", "capped_participating"):
+                participating_positions.append((position, share_class))
+
+        if not participating_positions:
+            return remaining, step_number
+
+        # Calculate total as-converted shares (all shares participate)
+        total_as_converted = snapshot.fully_diluted_shares
+
+        # Distribute participation pro-rata with all shares
+        amount_distributed_this_step = Decimal("0")
+
+        for position, share_class in participating_positions:
+            # Calculate pro-rata share based on as-converted shares
+            # For MVP: assume 1:1 conversion ratio
+            as_converted_shares = position.shares
+
+            if total_as_converted > 0:
+                pro_rata_share = remaining * (as_converted_shares / total_as_converted)
+
+                # Check for cap (capped_participating only)
+                if share_class.participation_rights.participation_type == "capped_participating":
+                    cap_multiple = share_class.participation_rights.cap_multiple
+
+                    # Calculate total already received from liquidation preference
+                    liq_pref_received = sum(
+                        amount for key, amount in distributions[position.holder_id].items()
+                        if key.startswith("liquidation_preference_")
+                    )
+
+                    # Calculate original investment
+                    # Use cost_basis if available, otherwise shares * multiple
+                    if position.cost_basis is not None:
+                        original_investment = position.cost_basis
+                    else:
+                        original_investment = position.shares * share_class.liquidation_preference.multiple if share_class.liquidation_preference else position.shares
+
+                    # Calculate cap: cap_multiple * original_investment
+                    cap_amount = cap_multiple * original_investment if cap_multiple else Decimal("0")
+
+                    # Total can't exceed cap
+                    max_additional = max(Decimal("0"), cap_amount - liq_pref_received)
+                    participation_amount = min(pro_rata_share, max_additional)
+                else:
+                    # Unlimited participation
+                    participation_amount = pro_rata_share
+
+                distributions[position.holder_id]["participation"] = participation_amount
+                amount_distributed_this_step += participation_amount
+
+        # Record step
+        if amount_distributed_this_step > 0:
+            steps.append({
+                "step": step_number,
+                "step_name": "Participation Rights (Participating Preferred)",
+                "share_class_id": None,  # Multiple classes may participate
+                "amount_available": float(remaining),
+                "amount_distributed": float(amount_distributed_this_step),
+                "amount_remaining": float(remaining - amount_distributed_this_step),
+            })
+
+            remaining -= amount_distributed_this_step
+            step_number += 1
+
+        return remaining, step_number
+
+    def _distribute_to_common(
+        self,
+        snapshot: CapTableSnapshot,
+        remaining: Decimal,
+        distributions: Dict[str, Dict[str, Decimal]],
+        steps: List[Dict],
+        step_number: int,
+        non_participating_positions: List,
+    ) -> tuple[Decimal, int]:
+        """Distribute remaining proceeds to common (as-converted).
+
+        Distributes to:
+        - Common shares
+        - Non-participating preferred that chose to convert
+        - Already-participating preferred do NOT participate here (they got it in participation step)
+
+        Args:
+            snapshot: CapTableSnapshot
+            remaining: Remaining proceeds
+            distributions: Distribution tracking dict (mutated)
+            steps: Waterfall steps list (mutated)
+            step_number: Current step number
+            non_participating_positions: List of (position, share_class, choice) tuples
+
+        Returns:
+            (remaining_proceeds, next_step_number)
+        """
+        if remaining <= 0:
+            return remaining, step_number
+
+        # Build set of non-participating holders that took preference (don't participate in common)
+        took_preference = set()
+        for position, share_class, choice in non_participating_positions:
+            if choice == "preference":
+                took_preference.add((position.holder_id, position.share_class_id))
+
+        # Identify positions that participate in common distribution
+        # Exclude:
+        # 1. Participating preferred (they already got their share in participation step)
+        # 2. Non-participating preferred that took preference (they already got liquidation pref)
+        participating_in_common = set()
+
+        for position in snapshot.positions:
+            share_class = snapshot.share_classes.get(position.share_class_id)
+            if not share_class:
+                continue
+
+            # Skip if this is participating/capped_participating (they got participation already)
+            if share_class.participation_rights and \
+               share_class.participation_rights.participation_type in ("participating", "capped_participating"):
+                continue
+
+            # Skip if this is non-participating that took preference
+            if (position.holder_id, position.share_class_id) in took_preference:
+                continue
+
+            # Include everyone else (common, non-participating taking conversion, etc.)
+            participating_in_common.add((position.holder_id, position.share_class_id))
+
+        # Calculate total shares participating in common distribution
+        total_participating_shares = Decimal("0")
+        for position in snapshot.positions:
+            if (position.holder_id, position.share_class_id) in participating_in_common:
+                total_participating_shares += position.shares
+
+        # Distribute pro-rata among participating shares
+        if total_participating_shares > 0:
             for position in snapshot.positions:
+                if (position.holder_id, position.share_class_id) not in participating_in_common:
+                    continue
+
                 # For MVP: assume 1:1 conversion ratio
                 # In production: use ConversionRights.current_conversion_ratio
                 as_converted_shares = position.shares
 
-                position_distribution = remaining * (as_converted_shares / total_as_converted_shares)
+                position_distribution = remaining * (as_converted_shares / total_participating_shares)
                 distributions[position.holder_id]["common_distribution"] = position_distribution
 
         # Record step

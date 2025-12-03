@@ -84,24 +84,6 @@ class CapTableSnapshot(DomainModel):
         """
         return self.total_shares_outstanding + self.option_pool_available
 
-    @property
-    def total_voting_shares(self) -> ShareCount:
-        """Calculate total voting shares across all positions.
-
-        Each share class may have different votes_per_share.
-        Total voting power = sum(position.shares * share_class.votes_per_share)
-
-        Returns:
-            Total voting shares
-        """
-        total_votes = Decimal("0")
-        for position in self.positions:
-            share_class = self.share_classes.get(position.share_class_id)
-            if share_class:
-                votes = position.shares * share_class.votes_per_share
-                total_votes += votes
-        return total_votes
-
     def add_or_update_position(self, position: Position) -> None:
         """Add a new position or update existing position for same holder + share class.
 

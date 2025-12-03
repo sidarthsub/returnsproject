@@ -291,7 +291,7 @@ def test_safe_cap_exceeds_priced_round_valuation():
             event_date=date(2024, 6, 1),
             holder_id="series_a_investor",
             share_class_id="preferred",
-            shares_issued=Decimal("7500000"),
+            shares=Decimal("7500000"),
         )
     )
 
@@ -462,8 +462,10 @@ def test_multiple_safes_different_caps_with_option_pool():
     assert summary.iloc[0]["option_pool_shares"] == 2305000
 
     # Verify all ownership percentages sum correctly
+    # Option pool is 2.305M / 18.435M = 12.5%, so holders should sum to 87.5%
     total_pct = ownership_df["ownership_pct"].sum()
-    assert abs(total_pct - 100.0) < 0.1  # Allow 0.1% rounding
+    expected_pct = 100.0 - (2305000 / 18435485 * 100)  # 100% - pool%
+    assert abs(total_pct - expected_pct) < 0.1  # Allow 0.1% rounding
 
 
 # =============================================================================
@@ -857,3 +859,346 @@ def test_option_pool_fully_granted():
 
     # Total outstanding: 10M + 2.5M = 12.5M
     assert summary.iloc[0]["total_shares"] >= 12500000
+
+
+# =============================================================================
+# Pro-Rata Rights Tests (Participation)
+# =============================================================================
+
+def test_participating_preferred_basic():
+    """Test participating preferred shares (double dip).
+
+    Participating preferred gets:
+    1. Liquidation preference (1x)
+    2. Pro-rata share of remaining proceeds
+
+    Example: $10M invested at 20% ownership, $100M exit
+    - Gets $10M preference
+    - Gets 20% of remaining $90M = $18M
+    - Total: $28M (vs $20M for non-participating)
+    """
+    cap_table = CapTable(company_name="Participating Corp")
+
+    # Common shares
+    cap_table.share_classes["common"] = ShareClass(
+        id="common",
+        name="Common Stock",
+        share_type="common"
+    )
+
+    # Series A: Participating preferred
+    cap_table.share_classes["series_a"] = ShareClass(
+        id="series_a",
+        name="Series A Preferred",
+        share_type="preferred",
+        liquidation_preference=LiquidationPreference(
+            multiple=Decimal("1.0"),
+            seniority_rank=0
+        ),
+        participation_rights=ParticipationRights(
+            participation_type="participating"
+        )
+    )
+
+    # Founders: 8M common
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="founders_001",
+            event_date=date(2024, 1, 1),
+            holder_id="founders",
+            share_class_id="common",
+            shares=Decimal("8000000"),
+        )
+    )
+
+    # Series A: Invest at 20% ownership (2M shares)
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="series_a_001",
+            event_date=date(2024, 6, 1),
+            holder_id="series_a_investor",
+            share_class_id="series_a",
+            shares=Decimal("2000000"),
+        )
+    )
+
+    snapshot = cap_table.current_snapshot()
+
+    context = BlockContext()
+    context.set("cap_table_snapshot", snapshot)
+
+    # Execute cap table block to verify ownership
+    CapTableBlock().execute(context)
+    ownership_df = context.get("cap_table_ownership")
+
+    # Verify ownership percentages
+    series_a_ownership = ownership_df[ownership_df["holder_id"] == "series_a_investor"].iloc[0]["ownership_pct"]
+    assert abs(series_a_ownership - 20.0) < 0.1
+
+    # Verify preferred percentage
+    series_a_preferred_pct = ownership_df[ownership_df["holder_id"] == "series_a_investor"].iloc[0]["preferred_pct"]
+    assert abs(series_a_preferred_pct - 100.0) < 0.1  # 100% of preferred
+
+
+def test_capped_participating_preferred():
+    """Test capped participating preferred (participation with cap).
+
+    Example: 1x preference with 3x cap
+    - Investment: $10M for 20% ownership
+    - Exit: $100M
+
+    Without cap: would get $10M + 20% of $90M = $28M
+    With 3x cap: capped at $30M (3x investment)
+    """
+    cap_table = CapTable(company_name="Capped Participation Corp")
+
+    # Common shares
+    cap_table.share_classes["common"] = ShareClass(
+        id="common",
+        name="Common Stock",
+        share_type="common"
+    )
+
+    # Series A: Capped participating preferred (1x with 3x cap)
+    cap_table.share_classes["series_a"] = ShareClass(
+        id="series_a",
+        name="Series A Preferred",
+        share_type="preferred",
+        liquidation_preference=LiquidationPreference(
+            multiple=Decimal("1.0"),
+            seniority_rank=0
+        ),
+        participation_rights=ParticipationRights(
+            participation_type="capped_participating",
+            cap_multiple=Decimal("3.0")
+        )
+    )
+
+    # Founders
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="founders_001",
+            event_date=date(2024, 1, 1),
+            holder_id="founders",
+            share_class_id="common",
+            shares=Decimal("8000000"),
+        )
+    )
+
+    # Series A
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="series_a_001",
+            event_date=date(2024, 6, 1),
+            holder_id="series_a_investor",
+            share_class_id="series_a",
+            shares=Decimal("2000000"),
+        )
+    )
+
+    snapshot = cap_table.current_snapshot()
+
+    context = BlockContext()
+    context.set("cap_table_snapshot", snapshot)
+
+    CapTableBlock().execute(context)
+    ownership_df = context.get("cap_table_ownership")
+
+    # Verify liquidation preference multiple
+    series_a_liq_pref = ownership_df[ownership_df["holder_id"] == "series_a_investor"].iloc[0]["liquidation_preference_multiple"]
+    assert series_a_liq_pref == 1.0
+
+    # Verify participation cap is tracked
+    series_a_class = cap_table.share_classes["series_a"]
+    assert series_a_class.participation_rights.cap_multiple == Decimal("3.0")
+
+
+def test_non_participating_preferred_conversion():
+    """Test non-participating preferred choosing conversion.
+
+    Non-participating gets EITHER:
+    - Liquidation preference, OR
+    - Pro-rata share (convert to common)
+
+    Whichever is greater.
+
+    Example: $10M invested at 20% ownership
+    - Low exit ($30M): Take $10M preference (better than 20% = $6M)
+    - High exit ($100M): Convert and take 20% = $20M (better than $10M pref)
+    """
+    cap_table = CapTable(company_name="Non-Participating Corp")
+
+    # Common shares
+    cap_table.share_classes["common"] = ShareClass(
+        id="common",
+        name="Common Stock",
+        share_type="common"
+    )
+
+    # Series A: Non-participating preferred with conversion rights
+    cap_table.share_classes["series_a"] = ShareClass(
+        id="series_a",
+        name="Series A Preferred",
+        share_type="preferred",
+        liquidation_preference=LiquidationPreference(
+            multiple=Decimal("1.0"),
+            seniority_rank=0
+        ),
+        participation_rights=ParticipationRights(
+            participation_type="non_participating"
+        ),
+        conversion_rights=ConversionRights(
+            converts_to_class_id="common",
+            initial_conversion_ratio=Decimal("1.0"),
+            current_conversion_ratio=Decimal("1.0")
+        )
+    )
+
+    # Founders
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="founders_001",
+            event_date=date(2024, 1, 1),
+            holder_id="founders",
+            share_class_id="common",
+            shares=Decimal("8000000"),
+        )
+    )
+
+    # Series A: 20% ownership
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="series_a_001",
+            event_date=date(2024, 6, 1),
+            holder_id="series_a_investor",
+            share_class_id="series_a",
+            shares=Decimal("2000000"),
+        )
+    )
+
+    snapshot = cap_table.current_snapshot()
+
+    context = BlockContext()
+    context.set("cap_table_snapshot", snapshot)
+
+    CapTableBlock().execute(context)
+    ownership_df = context.get("cap_table_ownership")
+
+    # Verify non-participating
+    series_a_class = cap_table.share_classes["series_a"]
+    assert series_a_class.participation_rights.participation_type == "non_participating"
+
+    # Verify conversion rights
+    assert series_a_class.conversion_rights is not None
+    assert series_a_class.conversion_rights.converts_to_class_id == "common"
+    assert series_a_class.conversion_rights.current_conversion_ratio == Decimal("1.0")
+
+
+def test_multiple_preferred_classes_with_different_participation():
+    """Test multiple preferred classes with different participation rights.
+
+    Series A: Non-participating (standard VC terms)
+    Series B: Participating (aggressive investor terms)
+
+    In an exit, this creates complex waterfall:
+    1. Series B gets preference
+    2. Series A gets preference
+    3. Series B participates pro-rata
+    4. Remaining goes to Series A (converted) and common
+    """
+    cap_table = CapTable(company_name="Mixed Participation Corp")
+
+    # Common
+    cap_table.share_classes["common"] = ShareClass(
+        id="common",
+        name="Common Stock",
+        share_type="common"
+    )
+
+    # Series A: Non-participating
+    cap_table.share_classes["series_a"] = ShareClass(
+        id="series_a",
+        name="Series A Preferred",
+        share_type="preferred",
+        liquidation_preference=LiquidationPreference(
+            multiple=Decimal("1.0"),
+            seniority_rank=1  # Junior to Series B
+        ),
+        participation_rights=ParticipationRights(
+            participation_type="non_participating"
+        )
+    )
+
+    # Series B: Participating (senior)
+    cap_table.share_classes["series_b"] = ShareClass(
+        id="series_b",
+        name="Series B Preferred",
+        share_type="preferred",
+        liquidation_preference=LiquidationPreference(
+            multiple=Decimal("1.0"),
+            seniority_rank=0  # Senior to Series A
+        ),
+        participation_rights=ParticipationRights(
+            participation_type="participating"
+        )
+    )
+
+    # Founders: 8M common
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="founders_001",
+            event_date=date(2024, 1, 1),
+            holder_id="founders",
+            share_class_id="common",
+            shares=Decimal("8000000"),
+        )
+    )
+
+    # Series A: 2M shares
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="series_a_001",
+            event_date=date(2024, 6, 1),
+            holder_id="series_a_investor",
+            share_class_id="series_a",
+            shares=Decimal("2000000"),
+        )
+    )
+
+    # Series B: 3M shares
+    cap_table.add_event(
+        ShareIssuanceEvent(
+            event_id="series_b_001",
+            event_date=date(2025, 1, 1),
+            holder_id="series_b_investor",
+            share_class_id="series_b",
+            shares=Decimal("3000000"),
+        )
+    )
+
+    snapshot = cap_table.current_snapshot()
+
+    context = BlockContext()
+    context.set("cap_table_snapshot", snapshot)
+
+    CapTableBlock().execute(context)
+    ownership_df = context.get("cap_table_ownership")
+
+    # Verify seniority
+    series_a_rank = cap_table.share_classes["series_a"].liquidation_preference.seniority_rank
+    series_b_rank = cap_table.share_classes["series_b"].liquidation_preference.seniority_rank
+    assert series_b_rank < series_a_rank  # Series B is senior
+
+    # Verify participation types
+    assert cap_table.share_classes["series_a"].participation_rights.participation_type == "non_participating"
+    assert cap_table.share_classes["series_b"].participation_rights.participation_type == "participating"
+
+    # Verify preferred percentages
+    series_a_pref_pct = ownership_df[ownership_df["holder_id"] == "series_a_investor"].iloc[0]["preferred_pct"]
+    series_b_pref_pct = ownership_df[ownership_df["holder_id"] == "series_b_investor"].iloc[0]["preferred_pct"]
+
+    # Series A: 2M / 5M preferred = 40%
+    assert abs(series_a_pref_pct - 40.0) < 0.1
+
+    # Series B: 3M / 5M preferred = 60%
+    assert abs(series_b_pref_pct - 60.0) < 0.1

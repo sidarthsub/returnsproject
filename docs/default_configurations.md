@@ -30,8 +30,8 @@ ShareClass(
     participation_rights=None,
     conversion_rights=None,
     anti_dilution_protection=None,
-    votes_per_share=Decimal("1.0"),  # DEFAULT: 1 vote per share
     created_in_round_id=None,
+    # Note: voting rights removed (not needed for returns modeling)
 )
 ```
 
@@ -67,8 +67,8 @@ ShareClass(
         protection_type="weighted_average_broad",  # DEFAULT: most common
     ),
 
-    votes_per_share=Decimal("1.0"),  # DEFAULT: 1 vote per share
     created_in_round_id=None,  # Optional
+    # Note: voting rights removed (not needed for returns modeling)
 )
 ```
 

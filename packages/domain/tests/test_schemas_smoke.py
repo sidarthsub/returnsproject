@@ -50,8 +50,7 @@ class TestBasicInstantiation:
         share_class = ShareClass(
             id="common",
             name="Common Stock",
-            share_type="common",
-            votes_per_share=Decimal("1.0")
+            share_type="common"
         )
         assert share_class.id == "common"
         assert share_class.share_type == "common"
