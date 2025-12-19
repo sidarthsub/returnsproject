@@ -162,6 +162,12 @@ class ShareTransferEvent(CapTableEvent):
         - Gift or inheritance
 
     Note: Transfer doesn't change total shares outstanding, just ownership.
+
+    Alchemy (optional):
+        If resulting_share_class_id is specified, the buyer receives shares
+        of a different class than what the seller gave up. This is common in
+        secondary transactions where investors negotiate to receive senior
+        preferred stock in exchange for junior preferred shares.
     """
 
     event_type: Literal["share_transfer"] = "share_transfer"
@@ -175,7 +181,7 @@ class ShareTransferEvent(CapTableEvent):
     )
 
     share_class_id: ShareClassId = Field(
-        description="Share class being transferred"
+        description="Share class being transferred (from seller's perspective)"
     )
 
     shares: ShareCount = Field(
@@ -187,6 +193,12 @@ class ShareTransferEvent(CapTableEvent):
         description="Transfer price per share (if disclosed)"
     )
 
+    resulting_share_class_id: Optional[ShareClassId] = Field(
+        default=None,
+        description="Share class buyer receives (if different from seller's class - 'alchemy'). "
+                    "If None, buyer receives same class as seller."
+    )
+
     def apply(self, snapshot: 'CapTableSnapshot') -> None:
         """Transfer shares from one holder to another."""
         snapshot.transfer_shares(
@@ -196,6 +208,7 @@ class ShareTransferEvent(CapTableEvent):
             shares=self.shares,
             transfer_date=self.event_date,
             transfer_price=self.price_per_share,
+            resulting_share_class_id=self.resulting_share_class_id,
         )
 
 

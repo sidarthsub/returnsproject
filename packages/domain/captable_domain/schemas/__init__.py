@@ -83,6 +83,9 @@ from .workbook import (
     WorkbookCFG,
     CapTableSnapshotCFG,
     WaterfallAnalysisCFG,
+    RoundCalculatorCFG,
+    InvestmentAllocationMode,
+    OptionPoolMode,
 )
 
 __all__ = [
@@ -131,4 +134,7 @@ __all__ = [
     "WorkbookCFG",
     "CapTableSnapshotCFG",
     "WaterfallAnalysisCFG",
+    "RoundCalculatorCFG",
+    "InvestmentAllocationMode",
+    "OptionPoolMode",
 ]

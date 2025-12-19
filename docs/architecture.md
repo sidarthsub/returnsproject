@@ -527,6 +527,11 @@ See [schema_design.md](schema_design.md) for complete Pydantic model definitions
 3. **Register** named ranges for cross-references
 4. **Declare** dependencies on other blocks
 
+### Current Implemented Blocks (MVP)
+
+- **CapTableBlock** computes three DataFrames: `cap_table_ownership` (per-holder detail with `preferred_pct` and `liquidation_preference_multiple` columns), `cap_table_by_class` (class-level aggregation), and `cap_table_summary` (totals for fully diluted shares, holders, share classes, common/preferred/option pool counts).
+- **WaterfallBlock** computes `waterfall_steps`, `waterfall_by_holder`, and `waterfall_by_class`. Participation handling matches the code: participating and capped participating get double-dip distributions (capped at `cap_multiple`), non-participating automatically pick the better of liquidation preference or as-converted common, and liquidation preference amounts use cost basis when available (fallback to shares * multiple).
+
 ### Block Base Classes
 
 ```python

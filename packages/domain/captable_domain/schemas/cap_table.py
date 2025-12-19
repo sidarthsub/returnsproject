@@ -168,28 +168,36 @@ class CapTableSnapshot(DomainModel):
         shares: Decimal,
         transfer_date: date,
         transfer_price: Optional[Decimal] = None,
+        resulting_share_class_id: Optional[str] = None,
     ) -> None:
         """Transfer shares from one holder to another.
 
         Args:
             from_holder: ID of holder transferring shares
             to_holder: ID of holder receiving shares
-            share_class_id: Share class being transferred
+            share_class_id: Share class being transferred (from seller)
             shares: Number of shares to transfer
             transfer_date: Date of transfer
             transfer_price: Price per share (if any)
+            resulting_share_class_id: Share class buyer receives (if different - 'alchemy').
+                                     If None, buyer receives same class as seller.
 
         Note:
             Total shares outstanding doesn't change - just ownership.
+            With alchemy, the seller's class shares are reduced and buyer's class
+            shares are increased (effectively a transfer + class conversion).
         """
-        # Reduce from_holder position
+        # Reduce from_holder position in seller's share class
         self.reduce_position(from_holder, share_class_id, shares)
 
-        # Add to to_holder position
+        # Determine which share class the buyer receives
+        buyer_share_class = resulting_share_class_id or share_class_id
+
+        # Add to to_holder position in buyer's share class
         self.add_or_update_position(
             Position(
                 holder_id=to_holder,
-                share_class_id=share_class_id,
+                share_class_id=buyer_share_class,
                 shares=shares,
                 acquisition_date=transfer_date,
                 cost_basis=transfer_price * shares if transfer_price else None,

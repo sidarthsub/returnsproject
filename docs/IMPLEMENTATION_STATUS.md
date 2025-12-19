@@ -1,6 +1,6 @@
 # Implementation Status & Documentation Alignment
 
-**Last Updated:** 2025-12-02
+**Last Updated:** 2025-12-02 (docs synced to code)
 **Purpose:** Track what's actually implemented vs what's documented
 
 ---
@@ -163,7 +163,7 @@
 - ✅ FIXED: Removed votes_per_share from ShareClass example
 - ✅ FIXED: Added note about voting rights removal
 - ✅ FIXED: Participation rights fully implemented in waterfall
-- ⚠️ UPDATE: DividendRights removed entirely (not just optional) - should document this
+- ✅ FIXED: Documented DividendRights removal (not present in schema)
 
 ### Default Configurations (default_configurations.md)
 
@@ -175,7 +175,7 @@
 ### Architecture (architecture.md)
 
 **Potential Updates:**
-- ⚠️ UPDATE: Block outputs documentation (add preferred_pct column)
+- ✅ FIXED: Block outputs documentation (added preferred_pct column callout)
 - ✅ Waterfall block now fully implements participation rights
 - ⚠️ UPDATE: Example schemas to match current implementation if needed
 
@@ -187,8 +187,8 @@
 
 1. ✅ **DONE:** Participation waterfall fully implemented
 2. ✅ **DONE:** This IMPLEMENTATION_STATUS.md serves as single source of truth
-3. **TODO:** Update schema_specification.md Section 3 (Share Classes) to document DividendRights removal
-4. **TODO:** Update architecture.md Block outputs to document preferred_pct column
+3. ✅ **DONE:** Update schema_specification.md Section 3 (Share Classes) to document DividendRights removal
+4. ✅ **DONE:** Update architecture.md Block outputs to document preferred_pct column
 5. **N/A:** No migration guide needed - participation is complete
 
 ### For Next Phase (Phase 2)
@@ -218,12 +218,12 @@
 |---------|----------|---------------------|---------|
 | votes_per_share | Required field | **Removed** | ✅ Docs updated |
 | total_voting_shares | Property exists | **Removed** | ✅ Docs updated |
-| preferred_pct | Not mentioned | **Added** to cap_table output | ⚠️ Need to document |
+| preferred_pct | Not mentioned | **Added** to cap_table output | ✅ Docs updated |
 | Participation waterfall | "Implemented" | **✅ FULLY IMPLEMENTED** | ✅ Complete! |
-| DividendRights | "Optional field" | **Completely removed** | ⚠️ Need to update |
+| DividendRights | "Optional field" | **Completely removed** | ✅ Docs updated |
 | Anti-dilution calc | "Implemented" | **Schema only**, no calculation | ⚠️ Need to clarify |
-| SAFE MFN | In schema spec | **Removed** | ⚠️ Need to update |
-| Pro-rata side letter | In schema spec | **Removed** | ⚠️ Need to update |
+| SAFE MFN | In schema spec | **Removed** | ✅ Docs updated |
+| Pro-rata side letter | In schema spec | **Removed** | ✅ Docs updated |
 
 ---
 

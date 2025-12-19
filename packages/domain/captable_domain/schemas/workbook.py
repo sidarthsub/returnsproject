@@ -8,13 +8,180 @@ The WorkbookCFG is the root configuration object that ties together:
 This is what gets passed to the Excel renderer to generate the workbook.
 """
 
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Dict
 from datetime import date
 from pydantic import Field, model_validator
 
 from .base import DomainModel
 from .cap_table import CapTable
 from .returns import ReturnsCFG
+
+
+# =============================================================================
+# Round Calculator Configuration
+# =============================================================================
+
+# Type aliases for allocation strategies
+InvestmentAllocationMode = Literal["manual", "target_ownership", "pro_rata"]
+OptionPoolMode = Literal["manual", "expansion_pct", "target_pct_inclusive", "target_pct_exclusive"]
+
+
+class RoundCalculatorCFG(DomainModel):
+    """Configuration for round design calculator - drives how cap table cells are populated.
+
+    The calculator configuration determines whether cap table cells are:
+    - **Hardcoded (blue font)** - Manual entry by user
+    - **Formula-driven (black font)** - Calculated automatically based on allocation rules
+
+    This allows flexible round modeling with different allocation strategies.
+
+    Investment Allocation Modes:
+    - **manual**: All investments hardcoded (blue font, user editable)
+    - **target_ownership**: Calculate investment needed to achieve target ownership % (formula, black font)
+    - **pro_rata**: Calculate investment to maintain previous round ownership % (formula, black font)
+
+    Option Pool Modes:
+    - **manual**: Hardcoded shares (blue font, user editable)
+    - **expansion_pct**: Add X% more shares (formula, black font)
+    - **target_pct_inclusive**: X% total post-money including existing pool (formula, black font)
+    - **target_pct_exclusive**: X% post-money net new excluding existing pool (formula, black font)
+
+    Examples:
+        # All manual (default - backward compatible)
+        RoundCalculatorCFG(enabled=False)
+
+        # Target ownership for all investors
+        RoundCalculatorCFG(
+            investment_allocation_mode="target_ownership",
+            target_ownership_pct=0.20  # 20% target
+        )
+
+        # Pro-rata for all investors
+        RoundCalculatorCFG(
+            investment_allocation_mode="pro_rata"
+        )
+
+        # Mixed: some manual, some target, some pro-rata
+        RoundCalculatorCFG(
+            investment_allocation_mode="manual",  # Default for others
+            per_investor_allocation={
+                "Lead Investor": "target_ownership",
+                "Follow-on Fund": "pro_rata"
+            },
+            per_investor_target_pct={
+                "Lead Investor": 0.25  # 25% target for lead
+            }
+        )
+
+        # Option pool expansion
+        RoundCalculatorCFG(
+            option_pool_mode="expansion_pct",
+            option_pool_expansion_pct=0.10  # Add 10% more shares
+        )
+
+        # Option pool target % (post-money)
+        RoundCalculatorCFG(
+            option_pool_mode="target_pct_inclusive",
+            option_pool_target_pct=0.15  # 15% total post-money
+        )
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Whether calculator is enabled. If False, all values are manual (hardcoded)"
+    )
+
+    target_round_id: Optional[str] = Field(
+        default=None,
+        description="Which round to apply calculator to. None = most recent preferred round on the sheet"
+    )
+
+    # =========================================================================
+    # Investment Allocation Configuration
+    # =========================================================================
+
+    investment_allocation_mode: InvestmentAllocationMode = Field(
+        default="manual",
+        description=(
+            "How to allocate investments:\n"
+            "- manual: All investments hardcoded (blue)\n"
+            "- target_ownership: Calculate investment needed for target % (formula, black)\n"
+            "- pro_rata: Calculate investment to maintain previous ownership % (formula, black)"
+        )
+    )
+
+    target_ownership_pct: Optional[float] = Field(
+        default=None,
+        description=(
+            "Target ownership % for target_ownership mode (e.g., 0.20 for 20%).\n"
+            "Used as default when investment_allocation_mode='target_ownership'.\n"
+            "Can be overridden per-investor via per_investor_target_pct."
+        )
+    )
+
+    per_investor_allocation: Optional[Dict[str, InvestmentAllocationMode]] = Field(
+        default=None,
+        description=(
+            "Override allocation mode for specific investors (for mixed strategies).\n"
+            "Key = investor holder name, Value = allocation mode for that investor.\n"
+            "Example: {'Investor A': 'target_ownership', 'Investor B': 'pro_rata'}"
+        )
+    )
+
+    per_investor_target_pct: Optional[Dict[str, float]] = Field(
+        default=None,
+        description=(
+            "Target ownership % for specific investors using target_ownership mode.\n"
+            "Key = investor holder name, Value = target % (e.g., 0.15 for 15%).\n"
+            "Only used when that investor's allocation mode is 'target_ownership'.\n"
+            "If not specified, falls back to target_ownership_pct."
+        )
+    )
+
+    # =========================================================================
+    # Option Pool Configuration
+    # =========================================================================
+
+    option_pool_mode: OptionPoolMode = Field(
+        default="manual",
+        description=(
+            "How to calculate option pool:\n"
+            "- manual: Hardcoded shares (blue)\n"
+            "- expansion_pct: Add X% more shares (formula, black)\n"
+            "- target_pct_inclusive: X% total post-money including existing pool (formula, black)\n"
+            "- target_pct_exclusive: X% post-money net new excluding existing pool (formula, black)"
+        )
+    )
+
+    option_pool_expansion_pct: Optional[float] = Field(
+        default=None,
+        description=(
+            "Expansion % for expansion_pct mode (e.g., 0.10 for 10% expansion).\n"
+            "Required when option_pool_mode='expansion_pct'."
+        )
+    )
+
+    option_pool_target_pct: Optional[float] = Field(
+        default=None,
+        description=(
+            "Target % for target_pct_inclusive or target_pct_exclusive modes.\n"
+            "E.g., 0.15 for 15% option pool post-money.\n"
+            "Required when option_pool_mode is 'target_pct_inclusive' or 'target_pct_exclusive'."
+        )
+    )
+
+    # =========================================================================
+    # Calculator Display
+    # =========================================================================
+
+    show_calculator_section: bool = Field(
+        default=True,
+        description=(
+            "Show calculator section below cap table for reference/planning.\n"
+            "Even when False, calculator modes still drive cap table formula generation.\n"
+            "Set to False to hide the calculator section while keeping formula-driven cells."
+        )
+    )
 
 
 # =============================================================================
@@ -46,6 +213,11 @@ class CapTableSnapshotCFG(DomainModel):
     as_of_date: Optional[date] = Field(
         default=None,
         description="Date for snapshot. None = current date (all events applied)"
+    )
+
+    round_calculator: RoundCalculatorCFG = Field(
+        default_factory=RoundCalculatorCFG,
+        description="Round design calculator configuration"
     )
 
 

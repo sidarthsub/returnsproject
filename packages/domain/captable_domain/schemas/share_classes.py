@@ -278,6 +278,14 @@ class ShareClass(DomainModel):
         description="Protection against dilution in down rounds"
     )
 
+    # Pro rata rights
+    has_pro_rata_rights: bool = Field(
+        default=False,
+        description="Whether holders of this class have pro rata rights to invest "
+                    "in future rounds to maintain ownership percentage. "
+                    "Typically True for preferred stock, False for common/options."
+    )
+
     # Note: Dividend rights removed for MVP (rare for VC-backed startups)
     # Note: Voting rights removed (not needed for returns modeling)
 

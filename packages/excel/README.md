@@ -2,11 +2,20 @@
 
 Professional Excel cap table generation for venture-backed companies.
 
+> **📘 New: Interactive Features!** See [INTERACTIVE_CAP_TABLE.md](INTERACTIVE_CAP_TABLE.md) for the latest interactive Excel features including:
+> - 🔵 Visual input cell formatting (blue = editable)
+> - 🔒 Protected formulas (prevents accidental changes)
+> - 📝 Helpful hover comments (built-in guidance)
+> - ✅ Production ready with 87% test coverage
+
 ## Overview
 
 The `RoundSheetRenderer` generates clean, formulaic Excel cap tables with:
 - **One sheet per snapshot** (e.g., Post-Seed, Post-Series-A)
 - **Columns organized by round** (Common, Seed $, Seed #, Series A $, Series A #, etc.)
+- **Interactive inputs** - Blue cells = editable, white = calculated
+- **Protected formulas** - Can't accidentally break calculations
+- **Built-in guidance** - Hover over blue cells for help
 - **Fully formulaic** - Edit pre-money valuations and see shares/ownership recalculate
 - **Block-verified** - Excel calculations match domain model computations
 
@@ -137,6 +146,110 @@ N+1: % FD (fully diluted %)
 - Excel output matches domain model calculations
 - Comprehensive test suite ensures correctness
 
+### ✅ Round Design Calculator with Allocation Modes
+The Round Design Calculator drives how cap table cells are populated, allowing flexible round modeling with different allocation strategies.
+
+**Core concept:** Cap table cells can be either:
+- **Hardcoded (blue font)** - Manual entry by user
+- **Formula-driven (black font)** - Calculated automatically based on allocation rules
+
+#### Investment Allocation Modes
+
+- **manual** (default): All investments hardcoded (blue font, user editable)
+- **target_ownership**: Calculate investment needed to achieve target ownership % (formula, black font)
+- **pro_rata**: Calculate investment to maintain previous round ownership % (formula, black font)
+- **mixed**: Different investors use different allocation methods (per-investor configuration)
+
+#### Option Pool Modes
+
+- **manual** (default): Hardcoded shares (blue font, user editable)
+- **expansion_pct**: Add X% more shares (formula, black font)
+- **target_pct_inclusive**: X% total post-money including existing pool (formula, black font)
+- **target_pct_exclusive**: X% post-money net new excluding existing pool (formula, black font)
+
+#### Example Usage
+
+```python
+from captable_domain.schemas import CapTableSnapshotCFG, RoundCalculatorCFG
+
+# All manual (default - backward compatible)
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Seed",
+    round_calculator=RoundCalculatorCFG(enabled=False)
+)
+
+# Target ownership for all investors
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Series-A",
+    round_calculator=RoundCalculatorCFG(
+        enabled=True,
+        investment_allocation_mode="target_ownership",
+        target_ownership_pct=0.20,  # 20% target for all
+        show_calculator_section=False  # Hide calculator, keep formulas
+    )
+)
+
+# Pro-rata for all investors
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Series-A",
+    round_calculator=RoundCalculatorCFG(
+        enabled=True,
+        investment_allocation_mode="pro_rata"
+    )
+)
+
+# Mixed: some manual, some target, some pro-rata
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Series-A",
+    round_calculator=RoundCalculatorCFG(
+        enabled=True,
+        investment_allocation_mode="manual",  # Default for others
+        per_investor_allocation={
+            "Lead Investor": "target_ownership",
+            "Follow-on Fund": "pro_rata"
+        },
+        per_investor_target_pct={
+            "Lead Investor": 0.25  # 25% target for lead
+        }
+    )
+)
+
+# Option pool expansion by %
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Series-A",
+    round_calculator=RoundCalculatorCFG(
+        enabled=True,
+        option_pool_mode="expansion_pct",
+        option_pool_expansion_pct=0.10  # Add 10% more shares
+    )
+)
+
+# Option pool target % (post-money)
+snap_cfg = CapTableSnapshotCFG(
+    cap_table=cap_table,
+    label="Post-Series-A",
+    round_calculator=RoundCalculatorCFG(
+        enabled=True,
+        option_pool_mode="target_pct_inclusive",
+        option_pool_target_pct=0.15  # 15% total post-money
+    )
+)
+```
+
+#### Features
+
+- **Conditional cell population** - Cells are either hardcoded (blue) or formula-driven (black) based on allocation mode
+- **Calculator section optional** - Can be shown for reference or hidden while keeping formula-driven cells
+- **Per-investor configuration** - Mix and match allocation strategies for different investors
+- **Iterative calculation enabled** - Handles circular dependencies (e.g., option pool % affects total shares)
+- **Reverse-populated** - Formulas link to actual cap table data
+- **Configurable per snapshot** - Different snapshots can use different allocation modes
+
 ## Testing
 
 Run the comprehensive test suite:
@@ -156,7 +269,9 @@ Tests include:
 4. **% FD Totals** - Ownership adds to 100%
 5. **Total Shares Column** - Present and correct
 6. **Header Rows** - Clean, no data formulas
-7. **Investor Scoping** - Formulas only for participated rounds
+7. **Round Calculator** - Calculator section renders with all required fields
+8. **Investor Scoping** - Formulas only for participated rounds
+9. **Target Ownership Allocation** - Formula-driven investments work correctly
 
 ## Development
 

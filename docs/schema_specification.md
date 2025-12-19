@@ -34,7 +34,7 @@ This document specifies the complete Pydantic schema for the cap table domain mo
 
 **Module Organization:**
 ```
-packages/domain/src/schemas/
+packages/domain/captable_domain/schemas/
 ├── __init__.py
 ├── base.py                  # Base classes, shared types
 ├── share_classes.py         # ShareClass and economic rights
@@ -53,7 +53,7 @@ packages/domain/src/schemas/
 ### Base Types
 
 ```python
-# packages/domain/src/schemas/base.py
+# packages/domain/captable_domain/schemas/base.py
 
 from decimal import Decimal
 from datetime import date
@@ -103,7 +103,7 @@ RoundId = Annotated[str, Field(pattern=r'^[a-z][a-z0-9_]*$', description="Snake_
 ### Share Class
 
 ```python
-# packages/domain/src/schemas/share_classes.py
+# packages/domain/captable_domain/schemas/share_classes.py
 
 from typing import Optional, Literal
 from decimal import Decimal
@@ -204,54 +204,22 @@ class AntiDilutionProtection(DomainModel):
     Anti-dilution protection adjusts conversion price in down rounds.
 
     Types:
-    - Weighted average (broad): Includes all shares in calculation
-    - Weighted average (narrow): Excludes certain shares (options, etc.)
-    - Full ratchet: Conversion price drops to down round price
+    - none: No protection (MVP default)
+    - weighted_average_broad: Includes all shares in calculation
+    - weighted_average_narrow: Excludes certain shares (options, etc.)
+    - full_ratchet: Conversion price drops to down round price
+
+    Note: Carve-outs and detailed ratio calculations are deferred;
+    the schema only captures the protection type for now.
     """
     protection_type: Literal[
         "none",
         "weighted_average_broad",
         "weighted_average_narrow",
         "full_ratchet"
-    ]
-
-    # Carve-outs: shares excluded from anti-dilution calculation
-    carve_out_option_pool: bool = Field(
-        default=False,
-        description="Exclude option pool from anti-dilution calculation"
-    )
-
-    carve_out_shares: ShareCount = Field(
-        default=Decimal("0"),
-        description="Additional shares to exclude from calculation"
-    )
-
-
-class DividendRights(DomainModel):
-    """
-    Dividend rights (optional - most startups don't pay dividends).
-
-    Types:
-    - Cumulative: Unpaid dividends accumulate and must be paid before any other distributions
-    - Non-cumulative: Dividends don't accumulate; if not paid, they're lost
-    """
-    dividend_rate: Percentage = Field(
-        description="Annual dividend rate as percentage of investment or par value"
-    )
-
-    cumulative: bool = Field(
-        default=True,
-        description="If true, unpaid dividends accumulate and must be paid at exit/IPO"
-    )
-
-    accrued_dividends_payable_on_conversion: bool = Field(
-        default=True,
-        description="If true, accrued dividends are paid when shares convert"
-    )
-
-    participating_in_common_dividends: bool = Field(
-        default=True,
-        description="If true, also gets pro-rata share of common dividends"
+    ] = Field(
+        default="weighted_average_broad",
+        description="Type of anti-dilution protection"
     )
 
 
@@ -293,11 +261,7 @@ class ShareClass(DomainModel):
         description="Protection against dilution in down rounds"
     )
 
-    dividend_rights: Optional[DividendRights] = Field(
-        default=None,
-        description="Dividend rights (rare for startups)"
-    )
-
+    # Note: Dividend rights removed in MVP
     # Note: Voting rights removed (not needed for returns modeling)
 
     # Metadata
@@ -336,7 +300,7 @@ class ShareClass(DomainModel):
 ### Instrument Types
 
 ```python
-# packages/domain/src/schemas/instruments.py
+# packages/domain/captable_domain/schemas/instruments.py
 
 from typing import Annotated, Union, Literal, Optional
 from decimal import Decimal
@@ -559,7 +523,7 @@ Instrument = Annotated[
 ### Event Base Class
 
 ```python
-# packages/domain/src/schemas/events.py
+# packages/domain/captable_domain/schemas/events.py
 
 from abc import ABC, abstractmethod
 from typing import Optional, Literal, List, TYPE_CHECKING
@@ -915,7 +879,7 @@ class WarrantIssuance(CapTableEvent):
 ## Positions
 
 ```python
-# packages/domain/src/schemas/positions.py
+# packages/domain/captable_domain/schemas/positions.py
 
 from typing import Optional
 from datetime import date
@@ -976,7 +940,7 @@ class Position(DomainModel):
 ## Cap Table & Snapshots
 
 ```python
-# packages/domain/src/schemas/cap_table.py
+# packages/domain/captable_domain/schemas/cap_table.py
 
 from typing import Dict, List, Optional
 from datetime import date
@@ -1230,7 +1194,7 @@ class CapTable(DomainModel):
 ## Returns & Waterfall
 
 ```python
-# packages/domain/src/schemas/returns.py
+# packages/domain/captable_domain/schemas/returns.py
 
 from typing import List, Literal, Optional
 from decimal import Decimal
@@ -1283,7 +1247,7 @@ class ReturnsCFG(DomainModel):
 ## Workbook Configuration
 
 ```python
-# packages/domain/src/schemas/workbook.py
+# packages/domain/captable_domain/schemas/workbook.py
 
 from typing import Optional, Literal
 from pydantic import Field
@@ -1343,10 +1307,10 @@ Handled by Pydantic model validators (`@model_validator`):
 
 ### Domain-Level Validation
 
-Handled by separate validator classes in `packages/domain/src/validators/`:
+Handled by separate validator classes in `packages/domain/captable_domain/validators/`:
 
 ```python
-# packages/domain/src/validators/cap_table_validator.py
+# packages/domain/captable_domain/validators/cap_table_validator.py
 
 from decimal import Decimal
 from typing import List
@@ -1783,11 +1747,10 @@ class WaterfallValidator:
 
 **Edits Made:**
 - ✅ Added `target_post_money` option pool timing (pool sized to hit target % post-round)
-- ✅ Added cumulative/non-cumulative dividend support
-- ✅ Added simple/compound interest for convertible notes
-- ✅ Added accruing vs paid interest options
-- ✅ Added comprehensive domain-level validation (price > 0, no negative equity, etc.)
 - ✅ Added multi-currency support (base_currency + exchange_rates)
+- ✅ Simplified convertible note interest: accruing only, with simple or compound calculation
+- ✅ Removed dividend rights from MVP schema
+- ✅ Added comprehensive domain-level validation (price > 0, no negative equity, etc.)
 
 ---
 
@@ -1803,17 +1766,17 @@ Required additions:
 - PayToPlayProvision in share class
 ```
 
-**Scenario 2: Liquidation Preference Stacking with Dividends** ⚠️ PARTIALLY COVERED
+**Scenario 2: Liquidation Preference Stacking with Dividends** ⚠️ NOT COVERED (MVP REMOVAL)
 ```
 Series A has 8% cumulative dividend + 1x liquidation preference.
-At exit, Series A gets: MAX(1x + accrued dividends, conversion to common)
+At exit, Series A would expect: MAX(1x + accrued dividends, conversion to common)
 
 Current schema:
-- ✅ Has dividend_rights with cumulative flag
-- ❌ Missing: Accrued dividend tracking in waterfall
-- ❌ Missing: Dividend accrual calculation over time
+- ❌ Dividend rights removed from ShareClass in MVP
+- ❌ No accrued dividend tracking in snapshot or waterfall
 
 Required additions:
+- DividendRights on ShareClass
 - DividendAccrual tracking in CapTableSnapshot
 - Waterfall logic to include accrued dividends in liquidation preference
 ```
@@ -1948,7 +1911,7 @@ Required for MVP:
 - ✅ All current schemas as-is
 - ✅ Multi-currency support
 - ✅ Option pool target_post_money
-- ✅ Cumulative dividends (field exists, waterfall logic in Phase 1)
+- ✅ Participation rights with automatic better-of handling for non-participating
 
 **Defer to Phase 2+:**
 - Pay-to-play provisions
